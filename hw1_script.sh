@@ -2,35 +2,97 @@
 
 set -e
 
-# ── Step 1: Download FlameGraph tools if not present ─────────────────────────
-if [ ! -f "flamegraph.pl" ]; then
-    echo "[*] Downloading FlameGraph tools..."
-    git clone --depth=1 https://github.com/brendangregg/FlameGraph.git
-    cp FlameGraph/flamegraph.pl .
-    cp FlameGraph/stackcollapse-perf.pl .
-fi
+echo "============================================================"
+echo "  HW1 - Benchmark: Linear Scan vs Hash Index Lookup"
+echo "============================================================"
 
-# ── Step 2: Compile both versions ────────────────────────────────────────────
-echo "[*] Compiling not_optimized_version..."
+# Step 1: Compile
+echo ""
+echo "# Step 1 - Compilation"
+echo "------------------------------------------------------------"
+
+echo "[build] Compiling not_optimized_version..."
 g++ -std=c++17 -O0 -g -fno-omit-frame-pointer -o not_optimized_version not_optimized_version.cpp -Wall
 
-echo "[*] Compiling optimized_version..."
+echo "[build] Compiling optimized_version..."
 g++ -std=c++17 -O0 -g -fno-omit-frame-pointer -o optimized_version optimized_version.cpp -Wall
 
-# ── Step 3: perf stat (numbers) ────────────────────────────────────────────ptimized ──────────────────────
-echo ""
-echo "[*] Recording perf data for not_optimized_version..."
-perf record -e cpu-clock -g -F 99 -o perf_not_opt.data ./not_optimized_version
-perf script -i perf_not_opt.data | ./stackcollapse-perf.pl --inline | ./flamegraph.pl --title="Not Optimized" > flame_not_optimized.svg
-echo "[*] Flame graph saved: flame_not_optimized.svg"
+echo "[build] Done."
 
-# ── Step 5: perf record + flame graph for optimized ──────────────────────────
+# Step 2: Plain runs
 echo ""
-echo "[*] Recording perf data for optimized_version..."
-perf record -e cpu-clock -g -F 99 -o perf_opt.data ./optimized_version
-perf script -i perf_opt.data | ./stackcollapse-perf.pl --inline | ./flamegraph.pl --title="Optimized" > flame_optimized.svg
-echo "[*] Flame graph saved: flame_optimized.svg"
+echo "# Step 2 - Plain Runs"
+echo "------------------------------------------------------------"
+
+echo "[run] not_optimized_version:"
+./not_optimized_version
+echo ""
+echo "[run] optimized_version:"
+./optimized_version
+echo ""
+
+# Step 3: perf stat Pass 1 - cycles + instructions (IPC)
+echo ""
+echo "# Step 3 - perf stat Pass 1: cycles + instructions (IPC)"
+echo "------------------------------------------------------------"
+
+echo "[stat] not_optimized_version:"
+perf stat -e cycles,instructions ./not_optimized_version
+echo ""
+echo "[stat] optimized_version:"
+perf stat -e cycles,instructions ./optimized_version
+echo ""
+
+# Step 4: perf stat Pass 2 - cache + branches + task-clock
+echo ""
+echo "# Step 4 - perf stat Pass 2: cache, branches, task-clock"
+echo "------------------------------------------------------------"
+
+echo "[stat] not_optimized_version:"
+perf stat -e cache-references,cache-misses,branches,branch-misses,task-clock,context-switches ./not_optimized_version
+echo ""
+echo "[stat] optimized_version:"
+perf stat -e cache-references,cache-misses,branches,branch-misses,task-clock,context-switches ./optimized_version
+echo ""
+
+# Step 5: Flame graphs
+echo ""
+echo "# Step 5 - Flame Graphs"
+echo "------------------------------------------------------------"
+
+if [ ! -d "FlameGraph" ]; then
+    echo "[flamegraph] Cloning FlameGraph toolkit..."
+    git clone https://github.com/brendangregg/FlameGraph.git
+else
+    echo "[flamegraph] FlameGraph already present."
+fi
 
 echo ""
-echo "========== DONE =========="
-echo "Open flame_not_optimized.svg and flame_optimized.svg in a browser to view the flame graphs."
+echo "[record] not_optimized_version -> perf_not_opt.data"
+perf record -F 999 -e cpu-clock -g --call-graph fp -o perf_not_opt.data ./not_optimized_version
+
+echo ""
+echo "[record] optimized_version -> perf_opt.data"
+perf record -F 999 -e cpu-clock -g --call-graph fp -o perf_opt.data ./optimized_version
+
+echo ""
+echo "[verify] sample counts:"
+echo -n "  not_optimized_version: "
+perf script -i perf_not_opt.data | wc -l
+echo -n "  optimized_version:     "
+perf script -i perf_opt.data | wc -l
+
+echo ""
+echo "[svg] flame_not_optimized.svg"
+perf script -i perf_not_opt.data | ./FlameGraph/stackcollapse-perf.pl | ./FlameGraph/flamegraph.pl --title="Linear Scan - Not Optimized" > flame_not_optimized.svg
+
+echo ""
+echo "[svg] flame_optimized.svg"
+perf script -i perf_opt.data | ./FlameGraph/stackcollapse-perf.pl | ./FlameGraph/flamegraph.pl --title="Hash Index - Optimized" > flame_optimized.svg
+
+echo ""
+echo "============================================================"
+echo "  Done. Generated files:"
+echo "    - flame_not_optimized.svg"
+echo "    - flame_optimized.svg"
+echo "============================================================"
